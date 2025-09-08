@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Effective Stress Quick Checker</title>
+<style>
+  :root { --bd:#ddd; --tx:#111; --sub:#444; }
+  body { margin:0; background:#f4f7f7; font:16px/1.45 system-ui, Segoe UI, Roboto, Arial, sans-serif; color:var(--tx); }
+  .wrap { max-width:1100px; margin:24px auto; padding:18px; }
+  #eff-stress-calc { width:100%; box-sizing:border-box; border:1px solid var(--bd); border-radius:12px; padding:18px; background:#fafafa; }
+  #eff-stress-calc h3 { margin:0 0 14px; font-weight:600; }
+  .grid { display:grid; grid-template-columns: 260px 1fr 110px; gap:10px 16px; align-items:center; }
+  input { width:100%; padding:8px 10px; border:1px solid #bbb; border-radius:8px; }
+  .btns { margin:16px 0 10px; }
+  button { padding:10px 16px; border-radius:8px; cursor:pointer; }
+  .primary { border:1px solid #111; background:#111; color:#fff; }
+  .secondary { border:1px solid #777; background:#fff; color:#111; margin-left:6px; }
+  table { width:100%; border-collapse:collapse; background:#fff; }
+  th, td { padding:8px 10px; border-bottom:1px solid #eee; }
+  .notes { font-size:13px; color:var(--sub); margin-top:10px; }
+  @media (min-width:1200px){ .grid { grid-template-columns: 320px 1fr 140px; } }
+  @media (max-width:640px){ .grid { grid-template-columns: 1fr; } .unit{display:none;} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="eff-stress-calc">
+      <h3>Effective Stress Quick Checker</h3>
+      <div class="grid">
+        <strong>Input</strong><span></span><span></span>
+        <label for="H">Total height H</label><input id="H" type="number" step="0.001" value="0.24"><span class="unit">m</span>
+        <label for="g">Gravity g</label><input id="g" type="number" step="0.01" value="9.81"><span class="unit">m/s²</span>
+        <label for="n">Porosity n</label><input id="n" type="number" step="0.01" min="0" max="1" value="0.45"><span class="unit">–</span>
+        <label for="rhop">Particle density ρ<sub>p</sub></label><input id="rhop" type="number" step="1" value="2000"><span class="unit">kg/m³</span>
+        <label for="rhow">Water density ρ<sub>w</sub></label><input id="rhow" type="number" step="1" value="1000"><span class="unit">kg/m³</span>
+        <label for="hw">Water table h<sub>w</sub></label><input id="hw" type="number" step="0.001" value="0.10"><span class="unit">m</span>
+        <label for="y">Check height y</label><input id="y" type="number" step="0.001" value="0.05"><span class="unit">m</span>
+      </div>
+      <div class="btns">
+        <button class="primary" type="button" onclick="effCalc_calc()">Calculate</button>
+        <button class="secondary" type="button" onclick="effCalc_reset()">Reset to defaults</button>
+      </div>
+      <div id="eff-results"></div>
+      <p class="notes">
+        Dry thickness = H − max(h<sub>w</sub>, y). Saturated thickness = max(h<sub>w</sub> − y, 0).
+        Total = γ<sub>sat</sub>·(sat thickness) + γ<sub>dry</sub>·(dry thickness).
+        u = ρ<sub>w</sub> g (h<sub>w</sub> − y) if y ≤ h<sub>w</sub>. Effective = Total − u.
+      </p>
+    </div>
+  </div>
+<script>
+  function v(id){ return parseFloat(document.getElementById(id).value); }
+  function fmt(x, d=1){ return Number.isFinite(x) ? x.toFixed(d) : "–"; }
+  function effCalc_calc(){
+    const H=v('H'), g=v('g'), n=v('n'), rhop=v('rhop'), rhow=v('rhow'), hw=v('hw'), y=v('y');
+    const phi = 1 - n;
+    const gamma_dry = phi * rhop * g;
+    const gamma_sat = ((phi * rhop) + (n * rhow)) * g;
+    const sat_thk  = Math.max(hw - y, 0);
+    const dry_thk  = H - Math.max(hw, y);
+    const u        = rhow * g * sat_thk;
+    const sigma_v  = gamma_sat * sat_thk + gamma_dry * dry_thk;
+    const sigma_eff= sigma_v - u;
+    document.getElementById('eff-results').innerHTML = `
+      <table>
+        <thead><tr><th style="text-align:left">Quantity</th><th style="text-align:right">Value</th><th style="text-align:left">Units</th></tr></thead>
+        <tbody>
+          <tr><td>Solid fraction φ = 1 − n</td><td style="text-align:right">${fmt(phi,3)}</td><td>–</td></tr>
+          <tr><td>γ<sub>dry</sub></td><td style="text-align:right">${fmt(gamma_dry,0)}</td><td>N/m³</td></tr>
+          <tr><td>γ<sub>sat</sub></td><td style="text-align:right">${fmt(gamma_sat,0)}</td><td>N/m³</td></tr>
+          <tr><td>Saturated thickness</td><td style="text-align:right">${fmt(sat_thk,3)}</td><td>m</td></tr>
+          <tr><td>Dry thickness</td><td style="text-align:right">${fmt(dry_thk,3)}</td><td>m</td></tr>
+          <tr><td>Pore pressure u</td><td style="text-align:right">${fmt(u,1)} (${fmt(u/1000,3)} kPa)</td><td>Pa</td></tr>
+          <tr><td>Total vertical stress σ<sub>v</sub></td><td style="text-align:right">${fmt(sigma_v,1)} (${fmt(sigma_v/1000,3)} kPa)</td><td>Pa</td></tr>
+          <tr><td><strong>Effective stress σ′</strong></td><td style="text-align:right"><strong>${fmt(sigma_eff,1)} (${fmt(sigma_eff/1000,3)} kPa)</strong></td><td>Pa</td></tr>
+        </tbody>
+      </table>`;
+  }
+  function effCalc_reset(){
+    document.getElementById('H').value=0.24; document.getElementById('g').value=9.81;
+    document.getElementById('n').value=0.45; document.getElementById('rhop').value=2000;
+    document.getElementById('rhow').value=1000; document.getElementById('hw').value=0.10;
+    document.getElementById('y').value=0.05; effCalc_calc();
+  }
+  document.addEventListener('DOMContentLoaded', effCalc_reset);
+</script>
+</body>
+</html>
