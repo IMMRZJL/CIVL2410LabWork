@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pixel → Excel & Scale Helper</title>
+  <style>
+    :root { --bg:#f8fafc; --fg:#0f172a; --muted:#475569; --accent:#2563eb; --card:#ffffff; --border:#e2e8f0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji"; background: var(--bg); color: var(--fg); }
+    .container { max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.04); padding: 16px; }
+    h1 { font-size: 1.35rem; margin: 0 0 8px; }
+    p.helper { margin: 4px 0 16px; color: var(--muted); }
+
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .row > * { margin: 0; }
+    .spacer { flex: 1; }
+
+    input[type="file"] { padding: 8px; border: 1px dashed var(--border); background: #fff; border-radius: 10px; }
+
+    button { appearance: none; border: 1px solid var(--border); background: #fff; color: var(--fg); padding: 8px 12px; border-radius: 10px; cursor: pointer; font-weight: 600; }
+    button:hover { border-color: #cbd5e1; }
+    button.active { border-color: var(--accent); color: #fff; background: var(--accent); }
+
+    #canvasWrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    canvas { display: block; width: 100%; height: auto; image-rendering: crisp-edges; }
+    .badge { display: inline-block; font-size: .85rem; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3730a3; border: 1px solid #c7d2fe; }
+
+    .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: 10px; margin-top: 12px; }
+    .info .box { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; min-height: 56px; }
+    .label { font-size: .8rem; color: var(--muted); margin-bottom: 6px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; word-break: break-all; }
+
+    .hint { font-size: .9rem; color: var(--muted); margin-top: 8px; }
+    .small { font-size: .85rem; color: var(--muted); }
+
+    .dot { position: absolute; width: 10px; height: 10px; background: #22c55e; border: 2px solid #065f46; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+    .dot.secondary { background: #f97316; border-color: #9a3412; }
+
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+    .copyBtn { margin-left: 8px; font-size: .85rem; padding: 4px 8px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Pixel → Excel & Scale Helper</h1>
+      <p class="helper">Upload an image, pick a mode, then click on the picture. No data is stored.</p>
+
+      <div class="row">
+        <input type="file" id="fileInput" accept="image/*" />
+        <div class="spacer"></div>
+        <span class="badge" id="modeBadge">Mode: Click</span>
+      </div>
+
+      <div class="toolbar">
+        <button id="clickModeBtn" class="active">Click mode</button>
+        <button id="scaleModeBtn">Scale mode (select 10 mm)</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+
+      <div id="canvasWrap" style="margin-top:12px;">
+        <canvas id="canvas" width="0" height="0" aria-label="image canvas"></canvas>
+      </div>
+
+      <div class="info">
+        <div class="box">
+          <div class="label">Image size (natural)</div>
+          <div class="mono" id="imgSize">—</div>
+        </div>
+        <div class="box">
+          <div class="label">Click info → Excel cell</div>
+          <div class="mono" id="clickInfo">Upload an image, then click</div>
+        </div>
+        <div class="box">
+          <div class="label">Scale info (10 mm)</div>
+          <div class="mono" id="scaleInfo">Select two points along 10 mm in Scale mode</div>
+        </div>
+      </div>
+
+      <p class="hint">Click mode tells you the Excel cell that matches your pixel. Rows are 1-indexed from the top. Columns convert to Excel letters. Scale mode gives pixels per 10 mm and the mm-per-pixel value.</p>
+    </div>
+  </div>
+
+  <script>
+    // Elements
+    const fileInput = document.getElementById('fileInput');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const canvasWrap = document.getElementById('canvasWrap');
+
+    const imgSize = document.getElementById('imgSize');
+    const clickInfo = document.getElementById('clickInfo');
+    const scaleInfo = document.getElementById('scaleInfo');
+
+    const clickModeBtn = document.getElementById('clickModeBtn');
+    const scaleModeBtn = document.getElementById('scaleModeBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const modeBadge = document.getElementById('modeBadge');
+
+    // State
+    let mode = 'click'; // 'click' or 'scale'
+    let image = new Image();
+    let scale = 1; // display scale from natural → canvas
+    let dots = []; // markers drawn on the overlay
+    let scalePoints = []; // natural coordinates for scale mode
+
+    function setMode(next) {
+      mode = next;
+      modeBadge.textContent = `Mode: ${next.charAt(0).toUpperCase() + next.slice(1)}`;
+      clickModeBtn.classList.toggle('active', next === 'click');
+      scaleModeBtn.classList.toggle('active', next === 'scale');
+      if (mode === 'click') {
+        scaleInfo.textContent = 'Select two points along 10 mm in Scale mode';
+      } else {
+        scalePoints = [];
+        scaleInfo.textContent = 'Click first point of a 10 mm segment on the ruler';
+      }
+    }
+
+    function numberToExcelColumn(n) {
+      // n is 1-based column index
+      let s = '';
+      while (n > 0) {
+        const r = (n - 1) % 26;
+        s = String.fromCharCode(65 + r) + s;
+        n = Math.floor((n - 1) / 26);
+      }
+      return s;
+    }
+
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (image && image.complete && image.naturalWidth) {
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      }
+      // Remove marker dots
+      dots.forEach(d => d.remove());
+      dots = [];
+    }
+
+    function placeDot(xDisp, yDisp, secondary=false) {
+      const dot = document.createElement('div');
+      dot.className = 'dot' + (secondary ? ' secondary' : '');
+      dot.style.left = `${xDisp}px`;
+      dot.style.top = `${yDisp}px`;
+      canvasWrap.appendChild(dot);
+      dots.push(dot);
+    }
+
+    function loadImageFromFile(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        image = new Image();
+        image.onload = () => {
+          // Fit to container width up to 960px
+          const maxW = Math.min(960, document.querySelector('.container').clientWidth - 32);
+          const natW = image.naturalWidth;
+          const natH = image.naturalHeight;
+          let dispW = natW;
+          let dispH = natH;
+          if (natW > maxW) {
+            const s = maxW / natW;
+            dispW = Math.round(natW * s);
+            dispH = Math.round(natH * s);
+          }
+          canvas.width = dispW;
+          canvas.height = dispH;
+          scale = dispW / natW; // display per natural
+          clearCanvas();
+          ctx.drawImage(image, 0, 0, dispW, dispH);
+          imgSize.textContent = `${natW} × ${natH} px`;
+          clickInfo.textContent = 'Ready. Click a point.';
+          scaleInfo.textContent = 'Select two points along 10 mm in Scale mode';
+          // Remove old dots
+          dots.forEach(d => d.remove());
+          dots = [];
+          scalePoints = [];
+        };
+        image.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function handleClick(evt) {
+      if (!image || !image.naturalWidth) return;
+      const rect = canvas.getBoundingClientRect();
+      const xDisp = evt.clientX - rect.left;
+      const yDisp = evt.clientY - rect.top;
+      // Map to natural pixel coordinates (0-based), then convert to 1-based for Excel mapping
+      const xNat = Math.max(0, Math.min(image.naturalWidth - 1, Math.round(xDisp / scale)));
+      const yNat = Math.max(0, Math.min(image.naturalHeight - 1, Math.round(yDisp / scale)));
+      const colIndex = xNat + 1; // 1-based
+      const rowIndex = yNat + 1; // 1-based
+
+      if (mode === 'click') {
+        placeDot(xDisp, yDisp);
+        const excelCol = numberToExcelColumn(colIndex);
+        const cellRef = `${excelCol}${rowIndex}`;
+        clickInfo.innerHTML = `Pixel (x=${colIndex}, y=${rowIndex}) → <strong>Excel cell ${cellRef}</strong>`;
+      } else if (mode === 'scale') {
+        if (scalePoints.length === 0) {
+          placeDot(xDisp, yDisp);
+          scalePoints.push({ x: xNat, y: yNat, xd: xDisp, yd: yDisp });
+          scaleInfo.textContent = 'First point recorded. Click the second point that is exactly 10 mm away along the ruler.';
+        } else if (scalePoints.length === 1) {
+          placeDot(xDisp, yDisp, true);
+          const p0 = scalePoints[0];
+          const dx = (xNat - p0.x);
+          const dy = (yNat - p0.y);
+          const distPx = Math.hypot(dx, dy);
+          const pxPer10mm = distPx;
+          const pxPerMm = pxPer10mm / 10;
+          const mmPerPx = 10 / pxPer10mm;
+          scaleInfo.innerHTML = `10 mm = <strong>${pxPer10mm.toFixed(2)} px</strong> | px/mm = <strong>${pxPerMm.toFixed(3)}</strong> | mm/px = <strong>${mmPerPx.toFixed(4)}</strong>`;
+          // Reset points so user can pick again
+          scalePoints = [];
+        }
+      }
+    }
+
+    // Events
+    fileInput.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) loadImageFromFile(f);
+    });
+
+    canvas.addEventListener('click', handleClick);
+
+    clickModeBtn.addEventListener('click', () => setMode('click'));
+    scaleModeBtn.addEventListener('click', () => setMode('scale'));
+
+    resetBtn.addEventListener('click', () => {
+      clearCanvas();
+      clickInfo.textContent = 'Ready. Click a point.';
+      scaleInfo.textContent = (mode === 'scale') ? 'Click first point of a 10 mm segment on the ruler' : 'Select two points along 10 mm in Scale mode';
+      scalePoints = [];
+    });
+
+    // Keyboard help: C for click mode, S for scale, R for reset
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'c') setMode('click');
+      if (e.key.toLowerCase() === 's') setMode('scale');
+      if (e.key.toLowerCase() === 'r') resetBtn.click();
+    });
+  </script>
+</body>
+</html>
