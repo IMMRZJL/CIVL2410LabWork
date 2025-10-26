@@ -293,18 +293,26 @@ function getFitRange(len) {
 function applyAxisRanges(layout, xs, ys) {
   const xMin = toNum(xminEl.value), xMax = toNum(xmaxEl.value);
   const yMin = toNum(yminEl.value), yMax = toNum(ymaxEl.value);
-  // Default ranges if both fields blank
-  if ((xMin===null || xMax===null) || (yMin===null || yMax===null)) {
-    const lims = defaultLimits(xs, ys);
-    if (lims) {
-      const [dx0,dx1,dy0,dy1] = lims;
-      if (xMin===null || xMax===null) { layout.xaxis.range = [dx0, dx1]; }
-      if (yMin===null || yMax===null) { layout.yaxis.range = [dy1, dy0]; } // reversed
-    }
+
+  // start from data-driven defaults
+  const lims = defaultLimits(xs, ys);
+  if (lims) {
+    const [dx0,dx1,dy0,dy1] = lims;
+    layout.xaxis.autorange = false;
+    layout.yaxis.autorange = false;
+    layout.xaxis.range = [dx0, dx1];
+    layout.yaxis.range = [dy1, dy0]; // inverted
   }
-  // Apply user ranges if both ends given
-  if (xMin!==null && xMax!==null) layout.xaxis.range = [xMin, xMax];
-  if (yMin!==null && yMax!==null) layout.yaxis.range = [yMax, yMin]; // reversed display
+
+  // override if user supplied both ends
+  if (xMin!==null && xMax!==null) {
+    layout.xaxis.autorange = false;
+    layout.xaxis.range = [xMin, xMax];
+  }
+  if (yMin!==null && yMax!==null) {
+    layout.yaxis.autorange = false;
+    layout.yaxis.range = [yMax, yMin]; // inverted
+  }
 }
 function updatePlot(overlays=null) {
   const { t_min, s_mm, sqrt_t } = getSeries();
@@ -313,8 +321,8 @@ function updatePlot(overlays=null) {
     Plotly.react(plotDiv, [], {
       annotations:[{text:"Enter at least two points", xref:"paper", yref:"paper", x:0.5, y:0.5, showarrow:false}],
       margin:{l:60,r:20,t:20,b:50},
-      xaxis:{title:"sqrt(t) [min^0.5]"},
-      yaxis:{title:"settlement s (mm)", autorange:"reversed"},
+      xaxis:{title:"sqrt(t) [min^0.5]", autorange:false, range:[0,1], zeroline:false},
+      yaxis:{title:"settlement s (mm)", autorange:false, range:[1,-0.1], zeroline:false},
       showlegend:true
     }, {displaylogo:false, responsive:true});
     lastPlotData = null;
@@ -366,12 +374,13 @@ function updatePlot(overlays=null) {
   const data = [measured, fitLine, fitPts, s0Mark, t115];
 
   const layout = {
-    margin:{l:60,r:20,t:10,b:50},
-    xaxis:{title:"sqrt(t) [min^0.5]"},
-    yaxis:{title:"settlement s (mm)", autorange:"reversed"},
-    legend:{orientation:"h", y:-0.2},
-    showlegend:true
+  margin:{l:60,r:20,t:10,b:50},
+  xaxis:{title:"sqrt(t) [min^0.5]", autorange:false, zeroline:false},
+  yaxis:{title:"settlement s (mm)", autorange:false, zeroline:false},
+  legend:{orientation:"h", y:-0.2},
+  showlegend:true
   };
+
 
   // Apply axis ranges
   applyAxisRanges(layout, sqrt_t, s_mm);
