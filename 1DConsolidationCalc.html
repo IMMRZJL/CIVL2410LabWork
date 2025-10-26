@@ -291,29 +291,44 @@ function getFitRange(len) {
   return [i0, i1];
 }
 function applyAxisRanges(layout, xs, ys) {
-  const xMin = toNum(xminEl.value), xMax = toNum(xmaxEl.value);
-  const yMin = toNum(yminEl.value), yMax = toNum(ymaxEl.value);
+  // filter to finite values
+  const xVals = xs.filter(Number.isFinite);
+  const yVals = ys.filter(Number.isFinite);
+  if (!xVals.length || !yVals.length) return;
 
-  // start from data-driven defaults
-  const lims = defaultLimits(xs, ys);
-  if (lims) {
-    const [dx0,dx1,dy0,dy1] = lims;
-    layout.xaxis.autorange = false;
-    layout.yaxis.autorange = false;
-    layout.xaxis.range = [dx0, dx1];
-    layout.yaxis.range = [dy1, dy0]; // inverted
-  }
+  // user overrides (only if both ends present)
+  const xMinUser = toNum(xminEl.value), xMaxUser = toNum(xmaxEl.value);
+  const yMinUser = toNum(yminEl.value), yMaxUser = toNum(ymaxEl.value);
 
-  // override if user supplied both ends
-  if (xMin!==null && xMax!==null) {
-    layout.xaxis.autorange = false;
-    layout.xaxis.range = [xMin, xMax];
-  }
-  if (yMin!==null && yMax!==null) {
-    layout.yaxis.autorange = false;
-    layout.yaxis.range = [yMax, yMin]; // inverted
-  }
+  // data bounds
+  const xMinData = Math.min(...xVals), xMaxData = Math.max(...xVals);
+  const yMinData = Math.min(...yVals), yMaxData = Math.max(...yVals);
+
+  const xSpan = Math.max(1e-9, xMaxData - xMinData);
+  const ySpan = Math.max(1e-9, yMaxData - yMinData);
+  const pad = 0.05;
+
+  const xLo = (xMinUser!==null && xMaxUser!==null) ? xMinUser : xMinData - pad*xSpan;
+  const xHi = (xMinUser!==null && xMaxUser!==null) ? xMaxUser : xMaxData + pad*xSpan;
+
+  const yLo = (yMinUser!==null && yMaxUser!==null) ? yMinUser : yMinData - pad*ySpan;
+  const yHi = (yMinUser!==null && yMaxUser!==null) ? yMaxUser : yMaxData + pad*ySpan;
+
+  layout.xaxis.autorange = false;
+  layout.yaxis.autorange = false;
+
+  layout.xaxis.type = "linear";
+  layout.yaxis.type = "linear";
+
+  layout.xaxis.range = [xLo, xHi];
+  layout.yaxis.range = [yHi, yLo];   // invert y (bigger value on top)
+
+  layout.xaxis.zeroline = false;
+  layout.yaxis.zeroline = false;
+  layout.xaxis.tickformat = ".2f";
+  layout.yaxis.tickformat = ".2f";
 }
+
 function updatePlot(overlays=null) {
   const { t_min, s_mm, sqrt_t } = getSeries();
   const plotDiv = document.getElementById("plot");
@@ -329,6 +344,15 @@ function updatePlot(overlays=null) {
     return;
   }
 
+  const layout = {
+  margin:{l:60,r:20,t:10,b:50},
+  xaxis:{title:"sqrt(t) [min^0.5]", autorange:false, type:"linear", zeroline:false},
+  yaxis:{title:"settlement s (mm)", autorange:false, type:"linear", zeroline:false},
+  legend:{orientation:"h", y:-0.2},
+  showlegend:true
+  };
+
+  
   // Fit initial line
   const [i0, i1] = getFitRange(sqrt_t.length);
   const xfit = sqrt_t.slice(i0, i1+1);
