@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cv from 1D consolidation — Taylor sqrt(t) method</title>
+<meta name="description" content="Taylor sqrt(t) method with t90/t50, interactive plot, CSV, and axis controls." />
+<link rel="preconnect" href="https://cdn.plot.ly">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root { --gap: 10px; --pad: 10px; --border:#e3e3e3; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  header { padding: 10px 14px; border-bottom: 1px solid var(--border); background: white; }
+  header h1 { margin:0; font-size: 18px; }
+  .wrap { display: grid; grid-template-columns: 360px 1fr; gap: var(--gap); min-height: calc(100vh - 52px); padding: var(--gap); }
+  aside { border:1px solid var(--border); border-radius: 8px; padding: var(--pad); background:white; overflow:auto; }
+  main  { display: grid; grid-template-rows: auto 1fr; gap: var(--gap); }
+  .panel { border:1px solid var(--border); border-radius: 8px; padding: var(--pad); background:white; }
+  fieldset { border:1px solid var(--border); border-radius:8px; padding:8px; margin: 8px 0; }
+  fieldset legend { padding:0 6px; font-weight:600; }
+  label { display:inline-block; margin: 4px 8px 4px 0; }
+  input[type="number"], input[type="text"] { width: 110px; padding:6px; }
+  .row { display:flex; align-items:center; gap:8px; flex-wrap: wrap; }
+  .col { display:flex; flex-direction:column; gap:6px; }
+  .btn { appearance: none; border:1px solid #bbb; background:#fff; padding:6px 10px; border-radius:6px; cursor:pointer; }
+  .btn:hover { background:#f2f2f2; }
+  .btn.primary { border-color:#3568d4; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
+  table { width:100%; border-collapse: collapse; }
+  th, td { border-bottom:1px solid var(--border); padding:6px; text-align:left; }
+  thead th { position: sticky; top: 0; background:#fff; z-index:1; }
+  .toolbar { display:flex; gap:6px; flex-wrap: wrap; margin-bottom:6px; }
+  .results { background: var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px; white-space:pre-wrap; }
+  .plot { width: 100%; height: 520px; }
+  .small { font-size:12px; color:#666; }
+  .grow { flex: 1 1 auto; }
+  @media (max-width: 1000px) {
+    .wrap { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cv from 1D consolidation — Taylor sqrt(t) method</h1>
+</header>
+
+<div class="wrap">
+  <aside>
+    <div class="col">
+      <div class="row"><strong>Drainage condition:</strong></div>
+      <div class="row" role="group" aria-label="Drainage condition">
+        <label><input type="radio" name="drain" value="double" checked> Double (both faces)</label>
+        <label><input type="radio" name="drain" value="single"> Single (one face)</label>
+      </div>
+
+      <div class="row">
+        <label>Sample thickness H<sub>0</sub> (mm):
+          <input id="h0" type="number" step="any" value="20.0" />
+        </label>
+      </div>
+
+      <fieldset>
+        <legend>Initial-line fit range (rows, 1-based)</legend>
+        <div class="row">
+          <label>from <input id="fitFrom" type="number" step="1" min="1" value="2" style="width:70px"></label>
+          <label>to <input id="fitTo" type="number" step="1" min="2" value="4" style="width:70px"></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Final settlement s∞ (optional)</legend>
+        <div class="row">
+          <input id="sInf" type="number" step="any" placeholder="leave blank if unknown" style="width:160px">
+        </div>
+        <label><input id="useLastAsSInf" type="checkbox" checked> Use last measured as s∞ if blank</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>1.15 line reference</legend>
+        <label><input type="radio" name="ref" value="s0" checked> s0 (intercept)</label>
+        <label><input type="radio" name="ref" value="origin"> Origin</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Axes & export</legend>
+        <div class="grid2">
+          <label>x min <input id="xmin" type="number" step="any" placeholder="auto"></label>
+          <label>x max <input id="xmax" type="number" step="any" placeholder="auto"></label>
+          <label>y min <input id="ymin" type="number" step="any" placeholder="auto"></label>
+          <label>y max <input id="ymax" type="number" step="any" placeholder="auto"></label>
+        </div>
+        <div class="row" style="margin-top:6px">
+          <button id="btnUpdate" class="btn">Update plot</button>
+          <button id="btnCompute" class="btn primary">Compute Cv</button>
+          <button id="btnDemo" class="btn">Load demo</button>
+          <button id="btnFitLimits" class="btn">Fit limits</button>
+          <button id="btnSaveFig" class="btn">Save figure</button>
+        </div>
+      </fieldset>
+
+      <div>
+        <h3 style="margin:6px 0 6px 0;">Cv results</h3>
+        <div id="results" class="results" aria-live="polite"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <section class="panel">
+      <div class="toolbar">
+        <button id="btnAdd" class="btn">Add row</button>
+        <button id="btnDel" class="btn">Delete last</button>
+        <button id="btnSort" class="btn">Sort by time</button>
+        <button id="btnDefaults" class="btn">Load defaults</button>
+        <label class="btn">
+          Import CSV <input id="fileCSV" type="file" accept=".csv,text/csv" hidden>
+        </label>
+        <button id="btnExport" class="btn">Export CSV</button>
+        <span class="grow"></span>
+        <span class="small">t in minutes, s in mm</span>
+      </div>
+      <div style="max-height: 220px; overflow:auto; border:1px solid var(--border); border-radius:8px;">
+        <table id="dataTable" aria-label="Time and settlement table">
+          <thead>
+            <tr><th style="width:35%">t (min)</th><th style="width:35%">s (mm)</th><th>Actions</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div id="plot" class="plot"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+/* ---------- Constants ---------- */
+const Tv50 = 0.197;
+const Tv90 = 0.848;
+const DEFAULT_TIMES_MIN = [0.25, 1, 2, 4, 9, 16, 25, 36];
+
+/* ---------- Helpers ---------- */
+function toNum(v) {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+function linearFit(x, y) {
+  const n = x.length;
+  if (n < 2) throw new Error("Need at least 2 points");
+  let sx=0, sy=0, sxx=0, sxy=0;
+  for (let i=0;i<n;i++){ const xi=x[i], yi=y[i]; sx+=xi; sy+=yi; sxx+=xi*xi; sxy+=xi*yi; }
+  const denom = n*sxx - sx*sx;
+  if (Math.abs(denom) < 1e-12) throw new Error("Singular fit");
+  const a = (n*sxy - sx*sy) / denom;
+  const b = (sy - a*sx) / n; // s0
+  return { a, b };
+}
+function interpXGivenY(x, y, yTarget) {
+  if (x.length < 2) return null;
+  for (let i=1;i<x.length;i++){
+    const y0=y[i-1], y1=y[i];
+    if (y0 === yTarget) return x[i-1];
+    if ((y0 - yTarget)*(y1 - yTarget) < 0){
+      const x0=x[i-1], x1=x[i];
+      if (y1===y0) return x0;
+      const frac = (yTarget - y0) / (y1 - y0);
+      return x0 + frac*(x1 - x0);
+    }
+  }
+  return null;
+}
+function interpYGivenX(x, y, xTarget) {
+  if (x.length < 2) return null;
+  for (let i=1;i<x.length;i++){
+    const x0=x[i-1], x1=x[i];
+    if ((x0 <= xTarget && xTarget <= x1) || (x1 <= xTarget && xTarget <= x0)) {
+      const y0=y[i-1], y1=y[i];
+      if (x1===x0) return y0;
+      const frac = (xTarget - x0) / (x1 - x0);
+      return y0 + frac*(y1 - y0);
+    }
+  }
+  return null;
+}
+function defaultLimits(xs, ys, pad=0.05) {
+  if (!xs.length || !ys.length) return null;
+  const xmin = Math.min(...xs), xmax=Math.max(...xs);
+  const ymin = Math.min(...ys), ymax=Math.max(...ys);
+  const xr = Math.max(1e-9, xmax - xmin), yr = Math.max(1e-9, ymax - ymin);
+  return [xmin - pad*xr, xmax + pad*xr, ymin - pad*yr, ymax + pad*yr];
+}
+
+/* ---------- Data table ---------- */
+const tbody = document.querySelector("#dataTable tbody");
+function addRow(tVal="", sVal="") {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="number" step="any" placeholder="" value="${tVal}"></td>
+    <td><input type="number" step="any" placeholder="" value="${sVal}"></td>
+    <td><button class="btn btn-small" type="button">Remove</button></td>`;
+  tr.querySelector("button").addEventListener("click", () => tr.remove());
+  tbody.appendChild(tr);
+}
+function deleteLast() {
+  const rows = tbody.querySelectorAll("tr");
+  if (rows.length) rows[rows.length-1].remove();
+}
+function getTableData() {
+  const rows = [...tbody.querySelectorAll("tr")];
+  const pairs = [];
+  for (const r of rows) {
+    const t = toNum(r.children[0].querySelector("input").value);
+    const s = toNum(r.children[1].querySelector("input").value);
+    if (t === null && s === null) continue;
+    if (Number.isFinite(t) && Number.isFinite(s)) {
+      pairs.push([t, s]);
+    }
+  }
+  pairs.sort((a,b) => a[0]-b[0]);
+  return pairs;
+}
+function loadDefaults() {
+  clearTable();
+  for (const t of DEFAULT_TIMES_MIN) addRow(String(t), "");
+}
+function clearTable() {
+  tbody.innerHTML = "";
+}
+function sortByTime() {
+  const pairs = getTableData();
+  clearTable();
+  for (const [t,s] of pairs) addRow(String(t), String(s));
+}
+function exportCSV() {
+  const pairs = getTableData();
+  let out = "t_min,s_mm\n";
+  for (const [t,s] of pairs) out += `${t},${s}\n`;
+  const blob = new Blob([out], {type:"text/csv;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "cv_data.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+document.querySelector("#fileCSV").addEventListener("change", e => {
+  const f = e.target.files?.[0];
+  if (!f) return;
+  f.text().then(txt => {
+    const lines = txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+    clearTable();
+    for (const line of lines) {
+      const [c1,c2] = line.split(",").map(s => s?.trim() ?? "");
+      if (c1?.toLowerCase().includes("t") || c2?.toLowerCase().includes("s")) continue; // skip header
+      const t = toNum(c1), s = toNum(c2);
+      if (t !== null || s !== null) addRow(c1, c2);
+    }
+  });
+});
+
+/* ---------- Form refs ---------- */
+const h0El = document.getElementById("h0");
+const fitFromEl = document.getElementById("fitFrom");
+const fitToEl = document.getElementById("fitTo");
+const sInfEl = document.getElementById("sInf");
+const useLastEl = document.getElementById("useLastAsSInf");
+const resultsEl = document.getElementById("results");
+const xminEl = document.getElementById("xmin");
+const xmaxEl = document.getElementById("xmax");
+const yminEl = document.getElementById("ymin");
+const ymaxEl = document.getElementById("ymax");
+
+/* ---------- Plot ---------- */
+let lastPlotData = null; // keep for Save
+function getSeries() {
+  const pairs = getTableData();
+  if (!pairs.length) return { t_min:[], s_mm:[], sqrt_t:[] };
+  const t_min = pairs.map(p=>p[0]);
+  const s_mm = pairs.map(p=>p[1]);
+  const sqrt_t = t_min.map(t=>Math.sqrt(Math.max(0, t)));
+  return { t_min, s_mm, sqrt_t };
+}
+function getFitRange(len) {
+  let i0 = Math.max(1, parseInt(fitFromEl.value||"2", 10)) - 1;
+  let i1 = Math.max(1, parseInt(fitToEl.value||"4", 10)) - 1;
+  i0 = Math.max(0, Math.min(i0, len-2));
+  i1 = Math.max(i0+1, Math.min(i1, len-1));
+  return [i0, i1];
+}
+function applyAxisRanges(layout, xs, ys) {
+  const xMin = toNum(xminEl.value), xMax = toNum(xmaxEl.value);
+  const yMin = toNum(yminEl.value), yMax = toNum(ymaxEl.value);
+  // Default ranges if both fields blank
+  if ((xMin===null || xMax===null) || (yMin===null || yMax===null)) {
+    const lims = defaultLimits(xs, ys);
+    if (lims) {
+      const [dx0,dx1,dy0,dy1] = lims;
+      if (xMin===null || xMax===null) { layout.xaxis.range = [dx0, dx1]; }
+      if (yMin===null || yMax===null) { layout.yaxis.range = [dy1, dy0]; } // reversed
+    }
+  }
+  // Apply user ranges if both ends given
+  if (xMin!==null && xMax!==null) layout.xaxis.range = [xMin, xMax];
+  if (yMin!==null && yMax!==null) layout.yaxis.range = [yMax, yMin]; // reversed display
+}
+function updatePlot(overlays=null) {
+  const { t_min, s_mm, sqrt_t } = getSeries();
+  const plotDiv = document.getElementById("plot");
+  if (t_min.length < 2) {
+    Plotly.react(plotDiv, [], {
+      annotations:[{text:"Enter at least two points", xref:"paper", yref:"paper", x:0.5, y:0.5, showarrow:false}],
+      margin:{l:60,r:20,t:20,b:50},
+      xaxis:{title:"sqrt(t) [min^0.5]"},
+      yaxis:{title:"settlement s (mm)", autorange:"reversed"},
+      showlegend:true
+    }, {displaylogo:false, responsive:true});
+    lastPlotData = null;
+    return;
+  }
+
+  // Fit initial line
+  const [i0, i1] = getFitRange(sqrt_t.length);
+  const xfit = sqrt_t.slice(i0, i1+1);
+  const yfit = s_mm.slice(i0, i1+1);
+  let a=0, s0=0;
+  try {
+    const fit = linearFit(xfit, yfit);
+    a = fit.a; s0 = fit.b;
+  } catch(e) {
+    // leave a=0, s0=0
+  }
+
+  const x0 = Math.min(...sqrt_t), x1 = Math.max(...sqrt_t);
+
+  const measured = {
+    type:"scatter", mode:"lines+markers", name:"Measured",
+    x: sqrt_t, y: s_mm, line:{width:2}, marker:{size:6}
+  };
+  const fitLine = {
+    type:"scatter", mode:"lines", name:`Initial fit rows ${i0+1}..${i1+1}`,
+    x:[x0,x1], y:[a*x0 + s0, a*x1 + s0],
+    line:{dash:"dash"}
+  };
+  const fitPts = {
+    type:"scatter", mode:"markers", name:"Fit points",
+    x:xfit, y:yfit, marker:{size:8}
+  };
+  const s0Mark = {
+    type:"scatter", mode:"markers", name:"s0 (intercept)",
+    x:[0], y:[s0], marker:{symbol:"x", size:10}
+  };
+
+  // 1.15 line
+  const ref = document.querySelector('input[name="ref"]:checked').value; // "s0" | "origin"
+  const a115 = a / 1.15;
+  const ybase = ref === "s0" ? s0 : 0.0;
+  const t115 = {
+    type:"scatter", mode:"lines", name:"1.15 line (a/1.15)",
+    x:[x0,x1], y:[ybase + a115*x0, ybase + a115*x1],
+    line:{dash:"dot"}
+  };
+
+  const data = [measured, fitLine, fitPts, s0Mark, t115];
+
+  const layout = {
+    margin:{l:60,r:20,t:10,b:50},
+    xaxis:{title:"sqrt(t) [min^0.5]"},
+    yaxis:{title:"settlement s (mm)", autorange:"reversed"},
+    legend:{orientation:"h", y:-0.2},
+    showlegend:true
+  };
+
+  // Apply axis ranges
+  applyAxisRanges(layout, sqrt_t, s_mm);
+
+  // Optional overlays from compute step: markers, vline
+  if (overlays?.shapes?.length) {
+    layout.shapes = overlays.shapes;
+  }
+  if (overlays?.traces?.length) {
+    data.push(...overlays.traces);
+  }
+
+  Plotly.react(plotDiv, data, layout, {displaylogo:false, responsive:true});
+  lastPlotData = { data, layout };
+}
+
+/* ---------- Compute Cv ---------- */
+function computeCv() {
+  const { t_min, s_mm, sqrt_t } = getSeries();
+  if (t_min.length < 3) {
+    alert("Need at least 3 points.");
+    return;
+  }
+  const [i0, i1] = getFitRange(sqrt_t.length);
+  const xfit = sqrt_t.slice(i0, i1+1);
+  const yfit = s_mm.slice(i0, i1+1);
+
+  let a=0, s0=0;
+  try {
+    const fit = linearFit(xfit, yfit);
+    a = fit.a; s0 = fit.b;
+  } catch(e) {
+    // keep defaults
+  }
+
+  // s∞
+  let sInf = toNum(sInfEl.value);
+  if ((sInf === null || !Number.isFinite(sInf)) && useLastEl.checked && s_mm.length>0) sInf = s_mm[s_mm.length-1];
+
+  // Taylor 1.15 intersection after fitted segment
+  const ref = document.querySelector('input[name="ref"]:checked').value; // "s0" | "origin"
+  const a115 = a / 1.15;
+  const ybase = ref === "s0" ? s0 : 0.0;
+  const diffs = s_mm.map((sm, k) => sm - (ybase + a115*sqrt_t[k]));
+
+  let t90m = null;
+  const startIdx = Math.max(i1, 1);
+  for (let i=startIdx; i<diffs.length; i++){
+    const d0 = diffs[i-1], d1 = diffs[i];
+    if (d0 === 0) { t90m = t_min[i-1]; break; }
+    if (d0 * d1 < 0) {
+      const x0 = sqrt_t[i-1], x1 = sqrt_t[i];
+      const frac = -d0 / (d1 - d0);
+      const xCross = x0 + frac*(x1 - x0);
+      t90m = xCross * xCross;
+      break;
+    }
+  }
+  if (t90m === null && Number.isFinite(sInf)) {
+    const target90 = ref === "s0" ? s0 + 0.90*(sInf - s0) : 0.90*sInf;
+    t90m = interpXGivenY(t_min, s_mm, target90);
+  }
+
+  // t50 if s∞ known
+  let t50m = null;
+  if (Number.isFinite(sInf)) {
+    const target50 = s0 + 0.50*(sInf - s0);
+    t50m = interpXGivenY(t_min, s_mm, target50);
+  }
+
+  // Drainage path Hdr in m
+  const H0_mm = toNum(h0El.value) ?? 0;
+  const drain = document.querySelector('input[name="drain"]:checked').value; // "double" | "single"
+  const Hdr_mm = drain === "double" ? (H0_mm/2.0) : H0_mm;
+  const Hdr_m = Hdr_mm / 1000.0;
+
+  // Cv values
+  let Cv_t90 = null, Cv_t50 = null;
+  if (Number.isFinite(t90m) && t90m > 0 && Hdr_m > 0) {
+    const t90_s = t90m * 60.0;
+    Cv_t90 = Tv90 * (Hdr_m*Hdr_m) / t90_s;
+  }
+  if (Number.isFinite(t50m) && t50m > 0 && Hdr_m > 0) {
+    const t50_s = t50m * 60.0;
+    Cv_t50 = Tv50 * (Hdr_m*Hdr_m) / t50_s;
+  }
+
+  // Overlays for plot
+  const traces = [];
+  const shapes = [];
+  if (Number.isFinite(t90m)) {
+    const s90_plot = interpYGivenX(t_min, s_mm, t90m);
+    const x90 = Math.sqrt(Math.max(0, t90m));
+    if (Number.isFinite(s90_plot)) {
+      traces.push({type:"scatter", mode:"markers", name:"t90", x:[x90], y:[s90_plot], marker:{size:10, symbol:"diamond"}});
+      shapes.push({type:"line", x0:x90, x1:x90, y0:Math.min(...s_mm), y1:Math.max(...s_mm), line:{dash:"dot", width:1, color:"#555"}});
+    }
+  }
+  if (Number.isFinite(t50m)) {
+    const s50_plot = interpYGivenX(t_min, s_mm, t50m);
+    const x50 = Math.sqrt(Math.max(0, t50m));
+    if (Number.isFinite(s50_plot)) {
+      traces.push({type:"scatter", mode:"markers", name:"t50", x:[x50], y:[s50_plot], marker:{size:10, symbol:"square"}});
+    }
+  }
+
+  // Refresh plot with overlays
+  updatePlot({traces, shapes});
+
+  // Results text
+  const a115val = a/1.15;
+  const parts = [];
+  parts.push(`Fit on rows ${i0+1}..${i1+1}: a = ${a.toPrecision(6)}, s0 = ${s0.toPrecision(6)} mm; a/1.15 = ${a115val.toPrecision(6)}`);
+  if (Number.isFinite(t90m) && Number.isFinite(Cv_t90)) {
+    parts.push(`t90 = ${t90m.toPrecision(4)} min  →  Cv90 = ${Cv_t90.toExponential(6)} m²/s`);
+  } else if (Number.isFinite(t90m)) {
+    parts.push(`t90 = ${t90m.toPrecision(4)} min  →  Cv90 not computed`);
+  } else {
+    parts.push(`t90 not found in range`);
+  }
+  if (Number.isFinite(t50m) && Number.isFinite(Cv_t50)) {
+    parts.push(`t50 = ${t50m.toPrecision(4)} min  →  Cv50 = ${Cv_t50.toExponential(6)} m²/s`);
+  } else if (Number.isFinite(t50m)) {
+    parts.push(`t50 = ${t50m.toPrecision(4)} min  →  Cv50 not computed`);
+  }
+  if (Number.isFinite(sInf)) parts.push(`s∞ used = ${Number(sInf).toPrecision(6)} mm`);
+  parts.push(`Drainage: ${drain === "double" ? "double" : "single"}, H0 = ${Number(H0_mm).toPrecision(6)} mm, Hdr = ${Number(Hdr_mm).toPrecision(6)} mm`);
+
+  resultsEl.textContent = parts.join("\n");
+}
+
+/* ---------- Buttons ---------- */
+document.getElementById("btnAdd").addEventListener("click", ()=>addRow("",""));
+document.getElementById("btnDel").addEventListener("click", deleteLast);
+document.getElementById("btnSort").addEventListener("click", sortByTime);
+document.getElementById("btnDefaults").addEventListener("click", loadDefaults);
+document.getElementById("btnExport").addEventListener("click", exportCSV);
+document.getElementById("btnUpdate").addEventListener("click", ()=>updatePlot());
+document.getElementById("btnCompute").addEventListener("click", computeCv);
+document.getElementById("btnFitLimits").addEventListener("click", ()=>{
+  const { t_min, s_mm, sqrt_t } = getSeries();
+  if (!t_min.length) return;
+  const lims = defaultLimits(sqrt_t, s_mm);
+  if (!lims) return;
+  const [x0,x1,y0,y1] = lims;
+  xminEl.value = x0.toPrecision(3);
+  xmaxEl.value = x1.toPrecision(3);
+  yminEl.value = y0.toPrecision(3);
+  ymaxEl.value = y1.toPrecision(3);
+  updatePlot();
+});
+document.getElementById("btnSaveFig").addEventListener("click", async ()=>{
+  const plotDiv = document.getElementById("plot");
+  try {
+    await Plotly.downloadImage(plotDiv, {format:"png", filename:"cv_taylor_plot", height:600, width:1000, scale:2});
+  } catch (e) {
+    alert("Could not save figure. Try a different browser.");
+  }
+});
+document.getElementById("btnDemo").addEventListener("click", ()=>{
+  clearTable();
+  const demo_t = [0, 0.25, 0.5, 1, 2.25, 4, 6.25, 9, 16, 25, 36, 49, 64, 81, 100, 300, 1440];
+  const demo_s = [0, 0.4, 0.5, 0.6, 0.82, 1.03, 1.20, 1.33, 1.45, 1.53, 1.58, 1.61, 1.64, 1.66, 1.67, 1.68, 1.75];
+  for (let i=0;i<demo_t.length;i++) addRow(String(demo_t[i]), String(demo_s[i]));
+  updatePlot();
+});
+
+/* ---------- Init ---------- */
+addRow("", "");
+updatePlot();
+</script>
+</body>
+</html>
